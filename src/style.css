@@ -209,7 +209,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  padding: 20px;
+  padding: 24px;
   background-color: #f8fafc;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
@@ -234,6 +234,7 @@ body {
   font-size: 0.95rem;
   color: #2563eb;
   font-weight: 600;
+  text-align: center;
 }
 
 .result-section {
@@ -257,6 +258,71 @@ body {
   border-radius: 12px;
   color: #64748b;
   font-size: 0.95rem;
+}
+
+.result-container {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.generated-image-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  background-color: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.generated-image-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.image-wrapper {
+  width: 100%;
+  max-width: 512px;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  background-color: #e2e8f0;
+}
+
+.generated-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.download-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  background-color: #ffffff;
+  color: #2563eb;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.download-btn:hover {
+  background-color: #eff6ff;
+  border-color: #2563eb;
+}
+
+.analysis-section-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 12px;
 }
 
 .cards-container {

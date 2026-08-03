@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 
-// 브라우저에서 이미지를 자동으로 압축/리사이징하는 헬퍼 함수
 const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.7) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -31,7 +30,6 @@ const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.7) => 
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // JPEG 포맷으로 압축하여 Data URL 생성 (용량 대폭 감소)
         const dataUrl = canvas.toDataURL('image/jpeg', quality);
         resolve(dataUrl);
       };
@@ -51,13 +49,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [resultText, setResultText] = useState('');
+  const [generatedImageUrl, setGeneratedImageUrl] = useState('');
 
   const handleStyleImagesChange = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
 
     try {
-      // 업로드한 파일들을 자동으로 리사이징/압축
       const compressedPreviews = await Promise.all(
         files.map((file) => compressImage(file, 800, 800, 0.7))
       );
@@ -78,7 +76,6 @@ export default function App() {
     if (!file) return;
 
     try {
-      // 캐릭터 파일 리사이징/압축
       const compressedPreview = await compressImage(file, 800, 800, 0.7);
       setCharacterFile(file);
       setCharacterPreview(compressedPreview);
@@ -134,6 +131,7 @@ export default function App() {
 
     setLoading(true);
     setResultText('');
+    setGeneratedImageUrl('');
 
     try {
       const payloadData = {
@@ -152,7 +150,6 @@ export default function App() {
         })
       });
 
-      // 서버 응답이 JSON이 아닐 경우(예: Vercel 413 Payload Too Large HTML 에러)를 위한 안전 처리
       const responseText = await response.text();
       let data;
 
@@ -160,7 +157,7 @@ export default function App() {
         data = JSON.parse(responseText);
       } catch (parseError) {
         if (response.status === 413) {
-          throw new Error('전송된 이미지 용량이 너무 큽니다. 스타일 이미지 개수를 줄이거나 더 적은 수를 업로드해 주세요.');
+          throw new Error('전송된 이미지 용량이 너무 큽니다. 스타일 이미지 개수를 줄여주세요.');
         }
         throw new Error('서버에서 올바르지 않은 응답이 반환되었습니다.');
       }
@@ -170,6 +167,9 @@ export default function App() {
       }
 
       setResultText(data.result);
+      if (data.imageUrl) {
+        setGeneratedImageUrl(data.imageUrl);
+      }
     } catch (err) {
       setError(err.message || '서버와 통신하는 중 문제가 발생했습니다.');
     } finally {
@@ -184,7 +184,7 @@ export default function App() {
       <header className="header">
         <h1 className="app-title">AIMAGE</h1>
         <p className="app-subtitle">
-          참고 드로잉 스타일과 캐릭터 사진을 업로드하고 원하는 요청사항을 입력하여 AI 캐릭터 재해석 드로잉 결과를 생성해 보세요.
+          참고 드로잉 스타일과 캐릭터 사진을 업로드하고 원하는 요청사항을 입력하여 AI 캐릭터 그림과 분석 결과를 생성해 보세요.
         </p>
       </header>
 
@@ -278,7 +278,7 @@ export default function App() {
             className="submit-btn"
             disabled={loading}
           >
-            {loading ? 'AI 드로잉 처리 중...' : 'AI 실행하기'}
+            {loading ? 'AI 이미지 생성 중...' : 'AI 실행하기'}
           </button>
         </form>
 
@@ -286,7 +286,7 @@ export default function App() {
           {loading && (
             <div className="loading-box">
               <div className="spinner"></div>
-              <p className="loading-text">Gemini AI가 스타일 분석 및 캐릭터 드로잉 프롬프트를 생성하고 있습니다...</p>
+              <p className="loading-text">Gemini가 스타일을 분석하고 AI 모델이 실제 그림을 렌더링하고 있습니다...</p>
             </div>
           )}
         </section>
@@ -300,17 +300,34 @@ export default function App() {
             </div>
           )}
 
-          {!loading && resultText && (
-            <div className="cards-container">
-              {parsedCards.map((card, idx) => (
-                <div key={idx} className="result-card">
-                  <div className="card-header">
-                    <span className="card-badge">{idx + 1}</span>
-                    <h3 className="card-title">{card.title}</h3>
+          {!loading && (generatedImageUrl || resultText) && (
+            <div className="result-container">
+              {generatedImageUrl && (
+                <div className="generated-image-box">
+                  <h3 className="generated-image-title">🎨 생성된 재해석 드로잉 이미지</h3>
+                  <div className="image-wrapper">
+                    <img src={generatedImageUrl} alt="AI 생성 이미지" className="generated-image" />
                   </div>
-                  <p className="card-body">{card.content}</p>
+                  <a href={generatedImageUrl} target="_blank" rel="noopener noreferrer" className="download-btn">
+                    🔍 고화질 원본 이미지 보기 / 다운로드
+                  </a>
                 </div>
-              ))}
+              )}
+
+              {parsedCards.length > 0 && (
+                <div className="cards-container">
+                  <h3 className="analysis-section-title">📝 AI 상세 분석 보고서</h3>
+                  {parsedCards.map((card, idx) => (
+                    <div key={idx} className="result-card">
+                      <div className="card-header">
+                        <span className="card-badge">{idx + 1}</span>
+                        <h3 className="card-title">{card.title}</h3>
+                      </div>
+                      <p className="card-body">{card.content}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>

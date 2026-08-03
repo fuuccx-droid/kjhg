@@ -36,33 +36,19 @@ export default async function handler(req, res) {
 
     const systemPrompt = `
 [AI의 역할]
-너는 드로잉 스타일 분석 및 캐릭터 재해석 전문 AI 디자이너이다.
+너는 드로잉 스타일 분석 및 최적의 이미지 생성 프롬프트(Prompt)를 설계하는 시각 디자이너이다.
 
 [수행해야 할 일]
-1. 사용자가 전달한 첫 번째 사진들의 드로잉 스타일(선 느낌, 채색 스타일, 빛과 질감, 색감 등)을 정밀 분석하라.
-2. 사용자가 전달한 두 번째 사진의 캐릭터 외형(헤어스타일, 의상, 표정, 포즈 등)과 특징을 분석하라.
-3. 사용자의 요청사항을 반영하여, 첫 번째 스타일로 두 번째 캐릭터를 완벽히 재해석한 드로잉 결과물 상세 묘사 및 이미지 프롬프트를 작성하라.
-
-[응답 기준]
-- 첫 번째 이미지들의 드로잉 스타일 분석
-- 두 번째 이미지의 캐릭터 특징 분석
-- 요청사항을 반영하여 첫 번째 스타일로 두 번째 캐릭터를 드로잉하는 상세 묘사 작성
-- 정보가 부족하거나 정확하게 판단하기 어려운 경우에는 내용을 임의로 만들어내지 말고 반드시 정확히 다음 문장만 답변하라:
-  "정확한 결과를 위해 정보를 조금 더 입력해 주세요."
-- 앱의 목적(드로잉 스타일 변환 및 캐릭터 드로잉)과 관계없는 내용이 입력된 경우 잘못된 결과를 만들지 말고, 다음과 같이 입력 예시를 안내하라:
-  "드로잉 스타일 참고 사진과 캐릭터 사진, 그리고 요청사항을 입력해 주세요. 예시: 첫 번째 스타일로 캐릭터가 책을 읽는 모습을 그려줘."
-
-[답변 분량 및 창의성 설정]
-- temperature: 0.7
-- 각 항목당 2~3문장 내외로 명확히 작성하라.
+1. 첫 번째 이미지들의 드로잉 스타일(질감, 채색, 선 느낌, 분위기 등)과 두 번째 이미지의 캐릭터 외형(머리스타일, 얼굴, 의상 등)을 정밀 분석하라.
+2. 분석 내용과 사용자의 요청사항을 종합하여, AI 이미지 생성 모델(Flux / SDXL)이 고품질 이미지를 생성할 수 있는 상세한 [영문 이미지 생성 프롬프트(English Image Generation Prompt)]를 작성하라.
+3. 한국어 분석 보고서도 함께 작성하라.
 
 [결과 형식]
-반드시 다음 순서와 항목 번호, 제목을 변경하지 말고 동일하게 작성하라:
-
-1. 드로잉 스타일 분석
-2. 캐릭터 특징 분석
-3. 스타일 변환 캐릭터 드로잉 상세 묘사
-4. 주의사항 및 추가 안내
+반드시 다음 JSON 형식만 정확히 출력하라 (마크다운 코드블록 없이 오직 유효한 JSON만 반환):
+{
+  "englishPrompt": "A highly detailed English image generation prompt combining the artwork style from image 1 and character traits from image 2...",
+  "analysis": "1. 드로잉 스타일 분석\n- ...\n\n2. 캐릭터 특징 분석\n- ...\n\n3. 스타일 변환 캐릭터 드로잉 상세 묘사\n- ...\n\n4. 주의사항 및 추가 안내\n- ..."
+}
 
 [사용자 입력 내용]
 요청사항: ${userRequestText || '요청사항 없음'}
@@ -122,7 +108,7 @@ export default async function handler(req, res) {
         ],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1200
+          maxOutputTokens: 1500
         }
       })
     });
@@ -136,13 +122,32 @@ export default async function handler(req, res) {
     }
 
     const data = await geminiResponse.json();
-    const generatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    let rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    if (!generatedText) {
-      return res.status(500).json({ error: 'AI 응답 결과가 비어 있습니다.' });
+    // 마크다운 코드블록 제거
+    rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+    let englishPrompt = 'A stylized digital artwork of a character in standard anime style';
+    let analysisText = rawText;
+
+    try {
+      const jsonParsed = JSON.parse(rawText);
+      if (jsonParsed.englishPrompt) englishPrompt = jsonParsed.englishPrompt;
+      if (jsonParsed.analysis) analysisText = jsonParsed.analysis;
+    } catch (e) {
+      console.log('JSON 파싱 실패, 기본 텍스트 반환으로 대체합니다.');
     }
 
-    return res.status(200).json({ result: generatedText });
+    // Flux AI 모델 기반 실시간 이미지 생성 URL 생성 (Pollinations AI 사용 - 무료 및 별도 API 키 불필요)
+    const randomSeed = Math.floor(Math.random() * 1000000);
+    const encodedPrompt = encodeURIComponent(englishPrompt);
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${randomSeed}&model=flux&nologo=true`;
+
+    return res.status(200).json({ 
+      result: analysisText,
+      imageUrl: imageUrl 
+    });
+
   } catch (error) {
     console.error('Server Handler Error:', error);
     return res.status(500).json({ error: '서버 내부 처리 중 오류가 발생했습니다.' });
