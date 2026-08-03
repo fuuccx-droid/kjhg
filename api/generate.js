@@ -1,3 +1,37 @@
+// 캐릭터 이미지를 tmpfiles.org에 임시 업로드하여 직링크(Direct URL) 생성 함수
+async function uploadTempImage(base64DataUrl) {
+  if (!base64DataUrl || typeof base64DataUrl !== 'string') return null;
+  
+  try {
+    const matches = base64DataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!matches) return null;
+
+    const mimeType = matches[1];
+    const base64Data = matches[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    const blob = new Blob([buffer], { type: mimeType });
+    const formData = new FormData();
+    formData.append('file', blob, 'character.jpg');
+
+    const response = await fetch('https://tmpfiles.org/api/v1/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data?.data?.url) {
+      // tmpfiles.org의 페이지 URL을 직링크(/dl/) URL로 전환
+      return data.data.url.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
+    }
+  } catch (err) {
+    console.error('Temp Upload Exception:', err);
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -34,19 +68,20 @@ export default async function handler(req, res) {
 
     const parts = [];
 
+    // Img2Img 전용 시스템 프롬프트: 원본 캐릭터 구조를 보존하도록 지시
     const systemPrompt = `
 [AI의 역할]
-너는 드로잉 스타일 분석 및 최적의 이미지 생성 프롬프트(Prompt)를 설계하는 시각 디자이너이다.
+너는 원본 캐릭터 사진의 구도, 포즈, 얼굴 이목구비 형태를 엄격히 보존하면서 드로잉 스타일을 자연스럽게 입히는 Img2Img 프롬프트 전문가이다.
 
 [수행해야 할 일]
-1. 첫 번째 이미지들의 드로잉 스타일(질감, 채색, 선 느낌, 분위기 등)과 두 번째 이미지의 캐릭터 외형(머리스타일, 얼굴, 의상 등)을 정밀 분석하라.
-2. 분석 내용과 사용자의 요청사항을 종합하여, AI 이미지 생성 모델(Flux / SDXL)이 고품질 이미지를 생성할 수 있는 상세한 [영문 이미지 생성 프롬프트(English Image Generation Prompt)]를 작성하라.
-3. 한국어 분석 보고서도 함께 작성하라.
+1. 두 번째 원본 캐릭터 이미지의 얼굴형, 머리스타일, 이목구비, 포즈, 구도를 정밀히 분석하라.
+2. 첫 번째 드로잉 스타일 이미지의 색감, 질감, 선 느낌, 채색 기법을 분석하라.
+3. 캐릭터의 원본 형태와 얼굴 구조를 100% 보존하면서 스타일만 덮어씌울 수 있도록, 핵심 형태 묘사어와 스타일 적용 텍스트를 포함한 영문 프롬프트(English Prompt)를 작성하라.
 
 [결과 형식]
-반드시 다음 JSON 형식만 정확히 출력하라 (마크다운 코드블록 없이 오직 유효한 JSON만 반환):
+반드시 다음 JSON 형식만 출력하라 (마크다운 코드블록 없이 오직 순수 JSON만 반환):
 {
-  "englishPrompt": "A highly detailed English image generation prompt combining the artwork style from image 1 and character traits from image 2...",
+  "englishPrompt": "Apply artistic drawing style to the base image, preserving the exact face shape, eyes, hair, pose, and composition of the character...",
   "analysis": "1. 드로잉 스타일 분석\n- ...\n\n2. 캐릭터 특징 분석\n- ...\n\n3. 스타일 변환 캐릭터 드로잉 상세 묘사\n- ...\n\n4. 주의사항 및 추가 안내\n- ..."
 }
 
@@ -81,7 +116,7 @@ export default async function handler(req, res) {
     }
 
     if (characterImage) {
-      parts.push({ text: "\n[두 번째 업로드 이미지: 캐릭터 참고 이미지]" });
+      parts.push({ text: "\n[두 번째 업로드 이미지: 캐릭터 원본 참고 이미지]" });
       const extracted = extractBase64Data(characterImage);
       if (extracted) {
         parts.push({
@@ -107,7 +142,7 @@ export default async function handler(req, res) {
           }
         ],
         generationConfig: {
-          temperature: 0.7,
+          temperature: 0.5,
           maxOutputTokens: 1500
         }
       })
@@ -124,10 +159,9 @@ export default async function handler(req, res) {
     const data = await geminiResponse.json();
     let rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // 마크다운 코드블록 제거
     rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-    let englishPrompt = 'A stylized digital artwork of a character in standard anime style';
+    let englishPrompt = 'Apply drawing style while preserving original character face and pose structure';
     let analysisText = rawText;
 
     try {
@@ -135,13 +169,23 @@ export default async function handler(req, res) {
       if (jsonParsed.englishPrompt) englishPrompt = jsonParsed.englishPrompt;
       if (jsonParsed.analysis) analysisText = jsonParsed.analysis;
     } catch (e) {
-      console.log('JSON 파싱 실패, 기본 텍스트 반환으로 대체합니다.');
+      console.log('JSON 파싱 예외 처리:', e);
     }
 
-    // Flux AI 모델 기반 실시간 이미지 생성 URL 생성 (Pollinations AI 사용 - 무료 및 별도 API 키 불필요)
+    // 캐릭터 원본 이미지를 Img2Img 입력용 직링크 URL로 변환
+    let characterDirectUrl = null;
+    if (characterImage) {
+      characterDirectUrl = await uploadTempImage(characterImage);
+    }
+
     const randomSeed = Math.floor(Math.random() * 1000000);
     const encodedPrompt = encodeURIComponent(englishPrompt);
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${randomSeed}&model=flux&nologo=true`;
+
+    // Img2Img 파라미터 적용: characterDirectUrl이 있을 경우 ?image= 파라미터에 원본 이미지 URL 전달
+    let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${randomSeed}&model=flux&nologo=true`;
+    if (characterDirectUrl) {
+      imageUrl += `&image=${encodeURIComponent(characterDirectUrl)}`;
+    }
 
     return res.status(200).json({ 
       result: analysisText,

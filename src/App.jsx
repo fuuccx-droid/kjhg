@@ -184,7 +184,7 @@ export default function App() {
       <header className="header">
         <h1 className="app-title">AIMAGE</h1>
         <p className="app-subtitle">
-          참고 드로잉 스타일과 캐릭터 사진을 업로드하고 원하는 요청사항을 입력하여 AI 캐릭터 그림과 분석 결과를 생성해 보세요.
+          캐릭터의 형태와 얼굴 구조를 고정한 상태에서 드로잉 스타일을 자연스럽게 덮어씌우는 Img2Img AI 변환기입니다.
         </p>
       </header>
 
@@ -192,7 +192,7 @@ export default function App() {
         <form onSubmit={handleSubmit} className="input-form">
           <div className="form-group">
             <label className="form-label">
-              1. 드로잉 스타일 이미지 (여러 개 업로드 가능)
+              1. 입힐 드로잉 스타일 이미지 (여러 개 업로드 가능)
             </label>
             <div className="file-upload-box">
               <input
@@ -227,7 +227,7 @@ export default function App() {
 
           <div className="form-group">
             <label className="form-label">
-              2. 캐릭터 이미지 (1개 업로드)
+              2. 원본 유지 캐릭터 이미지 (1개 필수)
             </label>
             <div className="file-upload-box">
               <input
@@ -265,7 +265,7 @@ export default function App() {
               id="request-text"
               className="text-input"
               rows="4"
-              placeholder="예: 첫 번째 사진의 오일 파스텔 드로잉 스타일로 두 번째 캐릭터가 카페에서 책을 읽고 있는 모습을 그려줘."
+              placeholder="예: 첫 번째 사진의 수채화 스타일 느낌으로 두 번째 캐릭터 사진의 얼굴과 구도를 그대로 유지하면서 합성해 줘."
               value={requestText}
               onChange={(e) => setRequestText(e.target.value)}
             />
@@ -278,7 +278,7 @@ export default function App() {
             className="submit-btn"
             disabled={loading}
           >
-            {loading ? 'AI 이미지 생성 중...' : 'AI 실행하기'}
+            {loading ? '원본 구조 유지하며 스타일 합성 중...' : 'AI 합성 실행하기'}
           </button>
         </form>
 
@@ -286,7 +286,7 @@ export default function App() {
           {loading && (
             <div className="loading-box">
               <div className="spinner"></div>
-              <p className="loading-text">Gemini가 스타일을 분석하고 AI 모델이 실제 그림을 렌더링하고 있습니다...</p>
+              <p className="loading-text">Gemini가 원본 구도를 템플릿화하고 Img2Img AI가 캐릭터 형태에 스타일을 합성 중입니다...</p>
             </div>
           )}
         </section>
@@ -296,7 +296,7 @@ export default function App() {
           
           {!loading && !resultText && (
             <div className="placeholder-box">
-              <p>위 입력창에 이미지를 업로드하고 요청사항을 작성한 후 [AI 실행하기] 버튼을 누르면 결과가 이곳에 표시됩니다.</p>
+              <p>위 입력창에 이미지를 업로드하고 요청사항을 작성한 후 [AI 합성 실행하기] 버튼을 누르면 결과가 이곳에 표시됩니다.</p>
             </div>
           )}
 
@@ -304,9 +304,9 @@ export default function App() {
             <div className="result-container">
               {generatedImageUrl && (
                 <div className="generated-image-box">
-                  <h3 className="generated-image-title">🎨 생성된 재해석 드로잉 이미지</h3>
+                  <h3 className="generated-image-title">🖼️ 원본 구조 유지 Img2Img 합성 결과</h3>
                   <div className="image-wrapper">
-                    <img src={generatedImageUrl} alt="AI 생성 이미지" className="generated-image" />
+                    <img src={generatedImageUrl} alt="AI Img2Img 합성 이미지" className="generated-image" />
                   </div>
                   <a href={generatedImageUrl} target="_blank" rel="noopener noreferrer" className="download-btn">
                     🔍 고화질 원본 이미지 보기 / 다운로드
