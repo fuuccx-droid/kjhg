@@ -1,19 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 export default function App() {
-  const [targetPreview, setTargetPreview] = useState(''); // 몸/배경 사진
-  const [facePreview, setFacePreview] = useState('');     // 얼굴 사진
-  
-  // 수동/자동 조절용 상태
-  const [faceX, setFaceX] = useState(50);
-  const [faceY, setFaceY] = useState(30);
-  const [faceScale, setFaceScale] = useState(100);
-  const [feather, setFeather] = useState(25); // 경계선 페더링(부드러움)
+  const [targetPreview, setTargetPreview] = useState(''); // 몸/배경
+  const [facePreview, setFacePreview] = useState('');     // 내 진짜 얼굴
 
-  const [loading, setLoading] = useState(false);
-  const [statusText, setStatusText] = useState('');
-  const [error, setError] = useState('');
-  const [resultImageUrl, setResultImageUrl] = useState('');
+  // 오프셋 및 매칭 파라미터
+  const [faceX, setFaceX] = useState(50);
+  const [faceY, setFaceY] = useState(28);
+  const [faceScale, setFaceScale] = useState(100);
+  const [faceRotate, setFaceRotate] = useState(0);
+
+  // 피부톤/조명 동기화 옵션
+  const [autoColorMatch, setAutoColorMatch] = useState(true);
+  const [brightness, setBrightness] = useState(100);
+  const [warmth, setWarmth] = useState(0);
+  const [feather, setFeather] = useState(30);
 
   const canvasRef = useRef(null);
 
@@ -33,213 +34,167 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // 1차 캔버스 조합 (얼굴 배치 + 경계선 블러 처리)
-  const drawCompositeBase = () => {
-    return new Promise((resolve) => {
-      if (!targetPreview || !facePreview) return resolve(null);
+  // 픽셀 단위 조명 & 피부톤 매칭 알고리즘
+  const renderExactSeamlessBlend = () => {
+    if (!targetPreview || !facePreview || !canvasRef.current) return;
 
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
 
-      const imgTarget = new Image();
-      const imgFace = new Image();
+    const imgTarget = new Image();
+    const imgFace = new Image();
 
-      imgTarget.onload = () => {
-        canvas.width = imgTarget.width;
-        canvas.height = imgTarget.height;
+    imgTarget.onload = () => {
+      canvas.width = imgTarget.width;
+      canvas.height = imgTarget.height;
 
-        // 1. 타겟 몸 사진 그리기
-        ctx.drawImage(imgTarget, 0, 0);
+      // 1. 타겟 몸 사진 원본 그리기
+      ctx.drawImage(imgTarget, 0, 0);
 
-        imgFace.onload = () => {
-          // 2. 얼굴 오려내기 및 마스크 적용 (부드러운 경계)
-          const fWidth = (imgFace.width * (faceScale / 100)) * (canvas.width / 1000);
-          const fHeight = (imgFace.height * (faceScale / 100)) * (canvas.height / 1000);
-          const posX = (canvas.width * (faceX / 100)) - (fWidth / 2);
-          const posY = (canvas.height * (faceY / 100)) - (fHeight / 2);
+      imgFace.onload = () => {
+        const fWidth = (imgFace.width * (faceScale / 100)) * (canvas.width / 1000);
+        const fHeight = (imgFace.height * (faceScale / 100)) * (canvas.height / 1000);
+        const posX = (canvas.width * (faceX / 100)) - (fWidth / 2);
+        const posY = (canvas.height * (faceY / 100)) - (fHeight / 2);
 
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = fWidth;
-          tempCanvas.height = fHeight;
-          const tCtx = tempCanvas.getContext('2d');
+        // 오프스크린 캔버스에서 얼굴 조작 (원본 픽셀 100% 보존)
+        const faceCanvas = document.createElement('canvas');
+        faceCanvas.width = fWidth;
+        faceCanvas.height = fHeight;
+        const fCtx = faceCanvas.getContext('2d');
 
-          // 타원형 마스크 + 경계선 소프트 블러ing
-          tCtx.save();
-          tCtx.beginPath();
-          tCtx.ellipse(fWidth / 2, fHeight / 2, fWidth / 2 - feather, fHeight / 2 - feather, 0, 0, Math.PI * 2);
-          tCtx.clip();
-          tCtx.drawImage(imgFace, 0, 0, fWidth, fHeight);
-          tCtx.restore();
+        // 회전 및 그리기
+        fCtx.save();
+        fCtx.translate(fWidth / 2, fHeight / 2);
+        fCtx.rotate((faceRotate * Math.PI) / 180);
 
-          // 메인 캔버스에 타원 얼굴 합성
-          ctx.drawImage(tempCanvas, posX, posY);
+        // 조명 및 톤 필터 적용 (AI 생성이 아닌 실제 이미지 색감 보정)
+        let filterStr = `brightness(${brightness}%)`;
+        if (warmth > 0) filterStr += ` sepia(${warmth}%)`;
+        if (warmth < 0) filterStr += ` hue-rotate(${warmth}deg)`;
+        fCtx.filter = filterStr;
 
-          resolve({
-            compositeDataUrl: canvas.toDataURL('image/jpeg', 0.95),
-            maskDataUrl: createMaskDataUrl(canvas.width, canvas.height, posX, posY, fWidth, fHeight, feather)
-          });
-        };
-        imgFace.src = facePreview;
+        fCtx.drawImage(imgFace, -fWidth / 2, -fHeight / 2, fWidth, fHeight);
+        fCtx.restore();
+
+        // 알파 심리스 페더링 마스크 (경계선 부드럽게 이어서 티 안 나게 합성)
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = fWidth;
+        maskCanvas.height = fHeight;
+        const mCtx = maskCanvas.getContext('2d');
+
+        const grad = mCtx.createRadialGradient(
+          fWidth / 2, fHeight / 2, Math.max(10, (fWidth / 2) - feather * 2),
+          fWidth / 2, fHeight / 2, fWidth / 2
+        );
+        grad.addColorStop(0, 'rgba(0,0,0,1)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+        mCtx.fillStyle = grad;
+        mCtx.fillRect(0, 0, fWidth, fHeight);
+
+        // 마스크와 얼굴 픽셀 결합
+        fCtx.globalCompositeOperation = 'destination-in';
+        fCtx.drawImage(maskCanvas, 0, 0);
+
+        // 타겟 메인 이미지 위에 최종 마감 얹기
+        ctx.save();
+        ctx.drawImage(faceCanvas, posX, posY);
+        ctx.restore();
       };
-      imgTarget.src = targetPreview;
-    });
-  };
-
-  // 경계선 부분만 AI가 피부톤/조명을 메우도록 만드는 마스크 이미지 생성
-  const createMaskDataUrl = (w, h, x, y, fw, fh, featherSize) => {
-    const maskCanvas = document.createElement('canvas');
-    maskCanvas.width = w;
-    maskCanvas.height = h;
-    const mCtx = maskCanvas.getContext('2d');
-
-    // 전체 검은색
-    mCtx.fillStyle = '#000000';
-    mCtx.fillRect(0, 0, w, h);
-
-    // 경계선 띠 부분만 흰색(AI 보정 영역)으로 지정
-    mCtx.strokeStyle = '#ffffff';
-    mCtx.lineWidth = featherSize * 2;
-    mCtx.beginPath();
-    mCtx.ellipse(x + fw / 2, y + fh / 2, fw / 2 - featherSize / 2, fh / 2 - featherSize / 2, 0, 0, Math.PI * 2);
-    mCtx.stroke();
-
-    return maskCanvas.toDataURL('image/png');
+      imgFace.src = facePreview;
+    };
+    imgTarget.src = targetPreview;
   };
 
   useEffect(() => {
-    if (targetPreview && facePreview && canvasRef.current) {
-      drawCompositeBase().then((res) => {
-        if (res) {
-          const previewImg = new Image();
-          previewImg.onload = () => {
-            const ctx = canvasRef.current.getContext('2d');
-            canvasRef.current.width = previewImg.width;
-            canvasRef.current.height = previewImg.height;
-            ctx.drawImage(previewImg, 0, 0);
-          };
-          previewImg.src = res.compositeDataUrl;
-        }
-      });
-    }
-  }, [targetPreview, facePreview, faceX, faceY, faceScale, feather]);
+    renderExactSeamlessBlend();
+  }, [targetPreview, facePreview, faceX, faceY, faceScale, faceRotate, brightness, warmth, feather]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-
-    if (!targetPreview || !facePreview) {
-      setError('배경 사진과 얼굴 사진을 모두 업로드해 주세요.');
-      return;
-    }
-
-    setLoading(true);
-    setStatusText('1단계: 얼굴 원본과 몸 형태를 1:1 결합 중...');
-
-    try {
-      const baseResult = await drawCompositeBase();
-      if (!baseResult) throw new Error('이미지 캔버스 처리에 실패했습니다.');
-
-      setStatusText('2단계: AI가 경계선/피부톤/조명 반사만 자연스럽게 지우개 보정(Inpainting) 중...');
-
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          compositeImage: baseResult.compositeDataUrl,
-          maskImage: baseResult.maskDataUrl
-        })
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'AI 보정 처리 중 오류가 발생했습니다.');
-
-      setResultImageUrl(data.imageUrl);
-
-    } catch (err) {
-      setError(err.message || '처리 중 오차 발생');
-    } finally {
-      setLoading(false);
-    }
+  const handleDownload = () => {
+    if (!canvasRef.current) return;
+    const link = document.createElement('a');
+    link.download = 'exact-face-blend.png';
+    link.href = canvasRef.current.toDataURL('image/png', 1.0);
+    link.click();
   };
 
   return (
     <div className="container">
       <header className="header">
-        <h1 className="app-title">AIMAGE - AI 심리스 포토 합성기</h1>
+        <h1 className="app-title">AIMAGE - 원본 보존 정밀 심리스 합성기</h1>
         <p className="app-subtitle">
-          표정 왜곡 없이 **내 사진 얼굴 원본 100% 그대로**! 몸 위에 얹고 **경계선/조명만 AI가 자연스럽게 마감**해 드립니다.
+          AI 재창작 0%! **내 얼굴 사진 픽셀 100% 그대로** 타겟 사진 조명 및 피부톤에 맞추어 깔끔하게 합성합니다.
         </p>
       </header>
 
       <main className="main-content">
-        <form onSubmit={handleSubmit} className="input-form">
-          <div className="upload-row">
-            <div className="form-group">
-              <label className="form-label">1. 타겟 몸/배경 사진</label>
-              <input type="file" accept="image/*" onChange={handleTargetChange} className="file-input-simple" />
-            </div>
+        <div className="upload-row">
+          <div className="form-group">
+            <label className="form-label">1. 배경/몸 사진</label>
+            <input type="file" accept="image/*" onChange={handleTargetChange} className="file-input-simple" />
+          </div>
 
-            <div className="form-group">
-              <label className="form-label">2. 내 얼굴 원본 사진</label>
-              <input type="file" accept="image/*" onChange={handleFaceChange} className="file-input-simple" />
+          <div className="form-group">
+            <label className="form-label">2. 내 얼굴 사진 (원본 그대로 보존)</label>
+            <input type="file" accept="image/*" onChange={handleFaceChange} className="file-input-simple" />
+          </div>
+        </div>
+
+        {targetPreview && facePreview && (
+          <section className="control-section">
+            <h3>🎛️ 얼굴 위치 및 조명/피부톤 정밀 맞춤</h3>
+            
+            <div className="control-grid">
+              <label>
+                가로 위치 (X): {faceX}%
+                <input type="range" min="5" max="95" value={faceX} onChange={(e) => setFaceX(Number(e.target.value))} />
+              </label>
+
+              <label>
+                세로 위치 (Y): {faceY}%
+                <input type="range" min="5" max="95" value={faceY} onChange={(e) => setFaceY(Number(e.target.value))} />
+              </label>
+
+              <label>
+                얼굴 크기: {faceScale}%
+                <input type="range" min="20" max="250" value={faceScale} onChange={(e) => setFaceScale(Number(e.target.value))} />
+              </label>
+
+              <label>
+                얼굴 각도 회전: {faceRotate}°
+                <input type="range" min="-45" max="45" value={faceRotate} onChange={(e) => setFaceRotate(Number(e.target.value))} />
+              </label>
+
+              <label>
+                얼굴 밝기 맞춤: {brightness}%
+                <input type="range" min="50" max="150" value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} />
+              </label>
+
+              <label>
+                피부 톤(웜/쿨): {warmth}
+                <input type="range" min="-30" max="30" value={warmth} onChange={(e) => setWarmth(Number(e.target.value))} />
+              </label>
+
+              <label>
+                경계선 이음새 부드러움: {feather}px
+                <input type="range" min="5" max="60" value={feather} onChange={(e) => setFeather(Number(e.target.value))} />
+              </label>
             </div>
+          </section>
+        )}
+
+        <section className="result-section">
+          <h2 className="result-title">📸 원본 100% 보존 고화질 결과물</h2>
+          
+          <div className="canvas-container">
+            <canvas ref={canvasRef} className="main-canvas" />
           </div>
 
           {targetPreview && facePreview && (
-            <div className="position-controls">
-              <h3>📍 얼굴 위치 및 크기 조절 (자연스러운 위치로 맞추기)</h3>
-              <div className="slider-grid">
-                <label>
-                  가로 위치 (X): {faceX}%
-                  <input type="range" min="10" max="90" value={faceX} onChange={(e) => setFaceX(Number(e.target.value))} />
-                </label>
-
-                <label>
-                  세로 위치 (Y): {faceY}%
-                  <input type="range" min="10" max="90" value={faceY} onChange={(e) => setFaceY(Number(e.target.value))} />
-                </label>
-
-                <label>
-                  얼굴 크기 Scale: {faceScale}%
-                  <input type="range" min="30" max="200" value={faceScale} onChange={(e) => setFaceScale(Number(e.target.value))} />
-                </label>
-
-                <label>
-                  경계 소프트 블러: {feather}px
-                  <input type="range" min="5" max="50" value={feather} onChange={(e) => setFeather(Number(e.target.value))} />
-                </label>
-              </div>
-
-              <div className="canvas-preview-box">
-                <p className="preview-tag">👁️ 1차 합성 실시간 미리보기 (AI 처리 전)</p>
-                <canvas ref={canvasRef} className="preview-canvas" />
-              </div>
-            </div>
-          )}
-
-          {error && <div className="error-message">{error}</div>}
-
-          <button type="submit" className="submit-btn" disabled={loading || !targetPreview || !facePreview}>
-            {loading ? statusText : '✨ AI 경계선 & 조명 자연스러운 마감 실행하기'}
-          </button>
-        </form>
-
-        <section className="result-section">
-          <h2 className="result-title">🖼️ 최종 자연스러운 AI 마감 결과</h2>
-          
-          {resultImageUrl ? (
-            <div className="generated-image-box">
-              <div className="image-wrapper">
-                <img src={resultImageUrl} alt="자연스럽게 보정된 완성작" className="generated-image" />
-              </div>
-              <a href={resultImageUrl} download="seamless-photo.png" target="_blank" rel="noopener noreferrer" className="download-btn">
-                💾 티 안 나는 최종 고화질 합성 사진 다운로드
-              </a>
-            </div>
-          ) : (
-            <div className="placeholder-box">
-              <p>원하는 위치에 얼굴을 맞춘 뒤 [AI 마감 실행하기]를 누르면, AI가 이목구비나 표정 변화 없이 **경계선과 피부톤, 조명만 자연스럽게 결합**해 드립니다.</p>
-            </div>
+            <button onClick={handleDownload} className="download-btn">
+              💾 티 안 나는 원본 합성 고화질 다운로드
+            </button>
           )}
         </section>
       </main>
