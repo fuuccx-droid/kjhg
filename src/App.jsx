@@ -1,5 +1,46 @@
 import React, { useState } from 'react';
 
+// 브라우저에서 이미지를 자동으로 압축/리사이징하는 헬퍼 함수
+const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.7) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // JPEG 포맷으로 압축하여 Data URL 생성 (용량 대폭 감소)
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
 export default function App() {
   const [styleFiles, setStyleFiles] = useState([]);
   const [stylePreviews, setStylePreviews] = useState([]);
@@ -11,27 +52,20 @@ export default function App() {
   const [error, setError] = useState('');
   const [resultText, setResultText] = useState('');
 
-  const handleStyleImagesChange = (e) => {
+  const handleStyleImagesChange = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
 
-    const newFiles = [...styleFiles, ...files];
-    setStyleFiles(newFiles);
-
-    const newPreviews = [];
-    let loadedCount = 0;
-
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        newPreviews.push(event.target.result);
-        loadedCount++;
-        if (loadedCount === files.length) {
-          setStylePreviews((prev) => [...prev, ...newPreviews]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    try {
+      // 업로드한 파일들을 자동으로 리사이징/압축
+      const compressedPreviews = await Promise.all(
+        files.map((file) => compressImage(file, 800, 800, 0.7))
+      );
+      setStyleFiles((prev) => [...prev, ...files]);
+      setStylePreviews((prev) => [...prev, ...compressedPreviews]);
+    } catch (err) {
+      setError('이미지를 처리하는 중 오류가 발생했습니다.');
+    }
   };
 
   const removeStyleImage = (index) => {
@@ -39,16 +73,18 @@ export default function App() {
     setStylePreviews((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleCharacterImageChange = (e) => {
+  const handleCharacterImageChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    setCharacterFile(file);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setCharacterPreview(event.target.result);
-    };
-    reader.readAsDataURL(file);
+    try {
+      // 캐릭터 파일 리사이징/압축
+      const compressedPreview = await compressImage(file, 800, 800, 0.7);
+      setCharacterFile(file);
+      setCharacterPreview(compressedPreview);
+    } catch (err) {
+      setError('이미지를 처리하는 중 오류가 발생했습니다.');
+    }
   };
 
   const removeCharacterImage = () => {
@@ -116,7 +152,18 @@ export default function App() {
         })
       });
 
-      const data = await response.json();
+      // 서버 응답이 JSON이 아닐 경우(예: Vercel 413 Payload Too Large HTML 에러)를 위한 안전 처리
+      const responseText = await response.text();
+      let data;
+
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        if (response.status === 413) {
+          throw new Error('전송된 이미지 용량이 너무 큽니다. 스타일 이미지 개수를 줄이거나 더 적은 수를 업로드해 주세요.');
+        }
+        throw new Error('서버에서 올바르지 않은 응답이 반환되었습니다.');
+      }
 
       if (!response.ok) {
         throw new Error(data.error || '처리 중 오류가 발생했습니다.');
